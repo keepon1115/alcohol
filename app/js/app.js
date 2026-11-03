@@ -1,37 +1,922 @@
-import {APP,types,presets,observations,uid,today,week,addDays,validDate,alcohol,grams,fmt,emptyData,target,summary,validateBackup} from './model.js';
-import {open,save} from './db.js';
-let data=emptyData(),storageError='',dirty=false,busy=false;
-const app=document.querySelector('#app');
-function h(tag,attrs={},...kids){const e=document.createElement(tag);for(const [k,v]of Object.entries(attrs)){if(k.startsWith('on'))e.addEventListener(k.slice(2).toLowerCase(),v);else if(k==='text')e.textContent=v;else if(k==='value')e.value=v;else if(k==='class')e.className=v;else e.setAttribute(k,v);}for(const c of kids.flat(Infinity))if(c!=null)e.append(c instanceof Node?c:document.createTextNode(String(c)));return e;}
-const link=(text,url,cls='btn btn-quiet')=>h('a',{href:url,class:cls,text});
-const button=(text,fn,cls='btn btn-quiet')=>h('button',{type:'button',class:cls,text,onClick:fn});
-const p=(text,cls='')=>h('p',{text,class:cls});
-function field(label,input,hint=''){return h('label',{class:'field'},h('span',{class:'lab',text:label}),input,hint?h('span',{class:'hint',text:hint}):null);}
-function input(type,value='',attrs={}){return h('input',{type,value,...attrs});}
-function go(url){if(dirty&&!confirm('保存されていない入力を破棄しますか？'))return;dirty=false;location.hash=url;}
-document.addEventListener('click',e=>{const a=e.target.closest('a');if(a?.getAttribute('href')?.startsWith('#')&&dirty){e.preventDefault();go(a.getAttribute('href'));}});
-window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
-function notify(s){const el=document.querySelector('#message');if(el){el.textContent=s;el.focus();}else alert(s);}
-async function commit(next,after){if(busy)return;busy=true;document.querySelectorAll('button[type=submit]').forEach(b=>b.disabled=true);try{await save(next);data=next;dirty=false;after?.();}catch(e){notify('保存できませんでした。入力は残っています。'+e.message);}finally{busy=false;document.querySelectorAll('button[type=submit]').forEach(b=>b.disabled=false);}}
-function shell(title,node){app.replaceChildren(h('header',{class:'topbar'},location.hash&&location.hash!=='#/'?button('‹',()=>go('#/'),'icon-btn'):null,h('h1',{class:'title',text:title}),link('設定','#/settings','icon-btn')),storageError?h('div',{class:'status',role:'alert',text:storageError}):h('span',{hidden:''}),h('main',{},h('p',{id:'message',role:'status',tabindex:'-1',class:'saved-message'}),node),h('nav',{class:'tabbar','aria-label':'メインメニュー'},[['ノート','#/'],['事典','#/dictionary'],['気になる','#/wishlist']].map(([t,u])=>h('a',{href:u,...((location.hash||'#/')===u?{'aria-current':'page'}:{}),text:t}))));window.scrollTo(0,0);}
-function impressions(id){return data.impressions.filter(i=>i.recordId===id).sort((a,b)=>a.writtenAt.localeCompare(b.writtenAt));}
-function warnings(s,t){const out=[];if(grams(s.daily)>t.daily)out.push('この日の自主目標を '+fmt(grams(s.daily)-t.daily)+'g 超えています。');else if(s.daily>0&&grams(s.daily)===t.daily)out.push('この日の自主目標に達しています。');if(grams(s.weekly)>t.weekly)out.push('今週の自主目標を '+fmt(grams(s.weekly)-t.weekly)+'g 超えています。');if(s.days>t.days)out.push('今週の飲酒日数が自主目標を超えています。');return out;}
-function weekCard(){const s=summary(data),t=target(data);return h('section',{class:'card week'},h('div',{class:'row spread'},h('h2',{text:'今週の記録'}),h('span',{class:'small muted',text:s.start+' 〜 '+s.end})),p(fmt(grams(s.weekly))+'g / '+t.weekly+'g','amount'),h('div',{class:'progress',role:'progressbar','aria-label':'今週の自主目標に対する使用量','aria-valuemin':'0','aria-valuemax':String(t.weekly||1),'aria-valuenow':String(Math.min(grams(s.weekly),t.weekly||1))},h('div',{style:'width:'+Math.min(100,t.weekly?grams(s.weekly)/t.weekly*100:s.weekly?100:0)+'%'})),h('dl',{},h('div',{},h('dt',{text:'使用量'}),h('dd',{text:fmt(grams(s.weekly)/14)+' / '+fmt(t.weekly/14)+'カード'})),h('div',{},h('dt',{text:'飲酒日数'}),h('dd',{text:s.days+'日 / 週'+t.days+'日'})),h('div',{},h('dt',{text:'今週の残り（自主目標との差）'}),h('dd',{text:fmt(Math.max(0,t.weekly-grams(s.weekly)))+'g'})),h('div',{},h('dt',{text:'今日の記録'}),h('dd',{text:fmt(grams(s.daily))+'g'}))),...warnings(s,t).map(x=>p(x,'banner')),p('本人が設定する自主目標です。医学的に安全な量を示すものではありません。','small muted'));}
-function home(){const q=input('search','',{placeholder:'銘柄・種類・場所・感想で探す','aria-label':'過去の記録を検索'}),list=h('div');const paint=()=>{const term=q.value.normalize('NFKC').toLowerCase();list.replaceChildren();const rs=[...data.records].sort((a,b)=>b.drankOn.localeCompare(a.drankOn)||b.createdAt.localeCompare(a.createdAt)).filter(r=>[r.nameSnapshot,r.typeSnapshot,r.place,...impressions(r.id).map(i=>i.currentText)].join(' ').normalize('NFKC').toLowerCase().includes(term));if(!rs.length)list.append(p(term?'該当する記録がありません。':'まだ一杯の記録がありません。飲まない日も、そのままで。','muted'));for(const r of rs)list.append(h('article',{class:'entry'},h('a',{href:'#/record/'+r.id},p(r.drankOn+'　'+(r.typeSnapshot||'種類未設定'),'meta'),h('h3',{text:r.nameSnapshot||'名称未設定'}),p(impressions(r.id)[0]?.currentText||'感想はまだありません。','pre'),p(fmt(grams(alcohol(r.abvPercent,r.volumeMl)))+'g','meta'))));};q.addEventListener('input',paint);paint();shell('ノート',h('div',{},weekCard(),link('＋ お酒を記録','#/new','btn btn-primary btn-block'),h('h2',{text:'一杯のノート'}),q,list));}
-function recordForm(id,productId){const old=data.records.find(r=>r.id===id);if(id&&!old)return shell('見つかりません',p('この記録は見つかりません。'));const product=data.products.find(p=>p.id===productId);const r=old||(product?{productId:product.id,nameSnapshot:product.name,typeSnapshot:product.type,abvPercent:product.defaultAbv}:{}),initial=old?impressions(id).find(i=>i.kind==='initial'):null;const date=input('date',r.drankOn||today(),{required:'',max:today()}),name=input('text',r.nameSnapshot||''),type=h('select',{},h('option',{value:'',text:'未設定'}),types.map(t=>h('option',{value:t,text:t})));type.value=r.typeSnapshot||'';const abv=input('number',r.abvPercent??'',{min:'0',max:'100',step:'.01',inputmode:'decimal',required:''}),ml=input('number',r.volumeMl??'',{min:'.1',max:'100000',step:'.1',inputmode:'decimal',required:''}),place=input('text',r.place||''),text=h('textarea',{placeholder:'何を感じましたか？「今日は美味しかった！」だけでも。',value:initial?.currentText||''}),obs=observations.map((s,n)=>h('textarea',{rows:'2',value:initial?.currentObservations[n]||''})),calc=h('div',{class:'calc','aria-live':'polite'});let touched=!!old;
-const applyPreset=k=>{if(!presets[k])return;[abv.value,ml.value]=presets[k].map(String);touched=false;update();};type.addEventListener('change',()=>{if(!touched)applyPreset(type.value);});for(const el of [abv,ml])el.addEventListener('input',()=>{touched=true;update();});date.addEventListener('input',update);
-function update(){try{if(!validDate(date.value)||abv.value===''||ml.value==='')throw Error();const u=alcohol(Number(abv.value),Number(ml.value));const draft={...data,records:[...data.records.filter(x=>x.id!==id),{drankOn:date.value,abvPercent:Number(abv.value),volumeMl:Number(ml.value)}]};const s=summary(draft,date.value),t=target(data,date.value);calc.replaceChildren(p('この一杯 '+fmt(grams(u))+'g ・ '+fmt(grams(u)/14)+'カード'),p('保存後の当日 '+fmt(grams(s.daily))+'g ／ 週 '+fmt(grams(s.weekly))+'g','small'),...warnings(s,t).map(w=>p(w,'small')));}catch{calc.replaceChildren(p('度数と飲んだ量を入力すると計算します。','small'));}}
-const form=h('form',{},p('銘柄や種類が未確定でも記録できます。','muted'),h('h2',{text:'基本情報'}),field('飲んだ日',date),field('お酒の種類',type),h('details',{class:'section'},h('summary',{text:'度数・容量の入力補助'}),p('実際のラベルの度数と、飲んだ量を優先してください。','small muted'),h('div',{class:'row'},Object.keys(presets).map(k=>button(k,()=>{if(touched&&!confirm('手入力した度数・容量を目安で置き換えますか？'))return;type.value=k==='クラフトビール'?'ビール':k;applyPreset(k);dirty=true;},'btn btn-small')))),field('銘柄・商品名',name),h('div',{class:'two'},field('アルコール度数（%）',abv),field('飲んだ量（ml）',ml)),p('ハイボール・水割りは、割る前のお酒の量と度数で入力します。','small muted'),field('飲んだ場所・購入店（任意）',place),h('h2',{text:'アルコール計算'}),calc,h('h2',{text:'自分の感想'}),field('飲んだ感想を自由に書く',text),h('details',{class:'section'},h('summary',{text:'もう少し観察する（任意）'}),observations.map((s,n)=>field(s,obs[n]))),button('保存する',()=>form.requestSubmit(),'btn btn-primary btn-block'));form.addEventListener('input',()=>dirty=true);form.addEventListener('submit',e=>{e.preventDefault();if(!form.reportValidity())return;try{if(!validDate(date.value)||date.value>today())throw Error('飲んだ日を今日以前の日付で入力してください。');alcohol(Number(abv.value),Number(ml.value));const next=structuredClone(data),now=new Date().toISOString(),rid=id||uid();let productId=r.productId||null;if(!old&&!productId&&name.value.trim()){const candidates=next.products.filter(p=>p.name===name.value&&p.type===type.value);if(candidates.length===1&&confirm('登録済みの同じお酒に結び付けますか？'))productId=candidates[0].id;else {productId=uid();next.products.push({id:productId,name:name.value,type:type.value,defaultAbv:Number(abv.value),createdAt:now});}}
-const rec={id:rid,productId,drankOn:date.value,nameSnapshot:name.value,typeSnapshot:type.value,abvPercent:Number(abv.value),volumeMl:Number(ml.value),place:place.value,createdAt:r.createdAt||now,updatedAt:now,calculationVersion:1};next.records=next.records.filter(x=>x.id!==rid);next.records.push(rec);const values=obs.map(o=>o.value);if(initial){const i=next.impressions.find(x=>x.id===initial.id);if(i.currentText!==text.value||JSON.stringify(i.currentObservations)!==JSON.stringify(values)){i.revisions.push({text:i.currentText,observations:i.currentObservations,at:now});i.currentText=text.value;i.currentObservations=values;}}else next.impressions.push(makeImpression(rid,text.value,values,'initial'));commit(next,()=>go('#/record/'+rid));}catch(e){notify(e.message);}});update();shell(old?'一杯を編集':'お酒を記録',form);}
-function makeImpression(recordId,text,obs,kind){return {id:uid(),recordId,kind,writtenAt:new Date().toISOString(),originalText:text,currentText:text,originalObservations:obs,currentObservations:obs,revisions:[]};}
-function detail(id){const r=data.records.find(x=>x.id===id);if(!r)return shell('見つかりません',p('この記録はありません。'));const is=impressions(id),node=h('div',{},p(r.drankOn+'　'+(r.typeSnapshot||'種類未設定'),'muted'),h('h1',{text:r.nameSnapshot||'名称未設定'}),p(r.abvPercent+'% ・ '+r.volumeMl+'ml ・ 純アルコール '+fmt(grams(alcohol(r.abvPercent,r.volumeMl)))+'g'),r.place?p(r.place,'muted'):null,h('div',{class:'row'},link('編集','#/edit/'+id),button('削除',()=>{if(confirm('この一杯と感想・原文履歴を削除します。元に戻せません。削除しますか？'))commit({...data,records:data.records.filter(x=>x.id!==id),impressions:data.impressions.filter(x=>x.recordId!==id)},()=>go('#/'));})),h('h2',{text:'自分の感想'}));for(const i of is)node.append(h('section',{class:'mine-box'},p((i.kind==='initial'?'最初の感想':'追記')+'　'+today(new Date(i.writtenAt)),'when'),p(i.currentText||'（感想なし）','pre'),...i.currentObservations.map((o,n)=>o?h('div',{},h('strong',{text:observations[n]}),p(o,'pre')):null),h('details',{class:'section'},h('summary',{text:'初回原文・修正履歴を見る'}),p(i.originalText||'（本文なし）','pre'),...i.originalObservations.map((o,n)=>o?p(observations[n]+'：'+o,'pre'):null),...i.revisions.map(v=>p(v.at+'\n'+v.text,'revision pre')))));
-const area=h('textarea',{placeholder:'後から気づいたことを、前の感想を残したまま。','aria-label':'感想を追記'});area.addEventListener('input',()=>dirty=true);node.append(h('h3',{text:'この一杯に感想を追記'}),area,button('感想を追記する',()=>{if(!area.value.trim())return notify('追記する感想を入力してください。');commit({...data,impressions:[...data.impressions,makeImpression(id,area.value,observations.map(()=>''),'addition')]},()=>render());},'btn btn-block'),p('感想の追記では飲酒量は増えません。','small muted'));
-if(r.productId){const rs=data.records.filter(x=>x.productId===r.productId);node.append(h('h2',{text:'同じお酒の記録（'+rs.length+'回）'}),...rs.map(x=>link(x.drankOn+'　'+(x.nameSnapshot||'名称未設定'),'#/record/'+x.id,'chip')));}node.append(link('＋ このお酒をもう一度記録',r.productId?'#/new/'+r.productId:'#/new','btn btn-primary btn-block'));shell('一杯の記録',node);}
-function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=h('a',{href:url,download:name});a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
-function settings(){const t=target(data),daily=input('number',t.daily,{min:'0',max:'100000',step:'.1',required:''}),weekly=input('number',t.weekly,{min:'0',max:'100000',step:'.1',required:''}),days=input('number',t.days,{min:'0',max:'7',step:'1',required:''}),from=h('select',{},h('option',{value:week(),text:'今週から'}),h('option',{value:addDays(week(),7),text:'翌週から'}));const f=h('form',{},h('h2',{text:'自分で決める目標'}),p('安全な量を保証する設定ではありません。1カード＝14g。日本時間・月曜開始です。','small muted'),field('1日の上限目標（g）',daily),field('1週間の上限目標（g）',weekly),field('週の飲酒日数（最大）',days),field('適用する週',from),h('button',{type:'submit',class:'btn btn-primary',text:'目標を保存'}));f.addEventListener('input',()=>dirty=true);f.addEventListener('submit',e=>{e.preventDefault();if(!f.reportValidity())return;const v={from:from.value,daily:+daily.value,weekly:+weekly.value,days:+days.value};commit({...data,settings:{...data.settings,targetHistory:[...data.settings.targetHistory.filter(t=>t.from!==v.from),v]}},()=>{render();notify('目標を保存しました。');});});
-const file=input('file','',{accept:'.json,application/json','aria-label':'復元するJSONファイル'});file.addEventListener('change',async()=>{try{if(!file.files[0])return;const obj=JSON.parse((await file.files[0].text()).replace(/^\uFEFF/,''));const next=validateBackup(obj);if(confirm('現在の'+data.records.length+'杯の記録を、バックアップの'+next.records.length+'杯・感想'+next.impressions.length+'件で置き換えます。先に現在のJSONを書き出しておくことをおすすめします。復元しますか？'))await commit(next,()=>{render();notify('復元しました。');});}catch(e){notify('復元できません。現在のデータは変更していません。'+e.message);}finally{file.value='';}});
-shell('設定とデータ',h('div',{},f,h('h2',{text:'バックアップ'}),p('記録はこの端末のブラウザ内に保存します。端末変更やブラウザのデータ消去に備え、JSONを手元に残してください。','small muted'),p('記録 '+data.records.length+'杯 ／ 感想 '+data.impressions.length+'件'),button('完全バックアップを書き出す（JSON）',()=>{const now=new Date().toISOString();const snapshot=structuredClone(data);snapshot.settings.lastBackupExportAt=now;download(APP+'-'+today()+'.json',JSON.stringify({app:APP,schemaVersion:1,exportedAt:now,data:snapshot},null,2),'application/json');commit(snapshot,()=>notify('JSONの書き出しを開始しました。ファイルの保存を確認してください。'));},'btn btn-primary btn-block'),p(data.settings.lastBackupExportAt?'最終書き出し開始：'+data.settings.lastBackupExportAt:'まだ書き出していません。','small muted'),h('h3',{text:'JSONから置き換えて復元'}),file,h('h2',{text:'ホーム画面に置く'}),p('iPhone：Safariの共有から「ホーム画面に追加」。Android：Chromeのメニューからインストール。初回読み込み後、オフラインでも記録できます。','small'),p('探究お酒 v1.0 ・ 事典／気になるは次の版で追加予定です。','small muted')));}
-function render(){const [route,id]=(location.hash||'#/').slice(2).split('/');if(route==='new')recordForm(undefined,id);else if(route==='edit')recordForm(id);else if(route==='record')detail(id);else if(route==='settings')settings();else if(route==='dictionary')shell('事典',h('div',{},p('一杯から、背景をたどる。','lead serif'),...['お酒の種類と特徴','原料と製法','産地・歴史・文化','香り・味わい・余韻の表現','飲酒量と純アルコールの計算方法'].map((x,n)=>h('details',{class:'section'},h('summary',{text:x}),p(n===4?'容量（ml）× 度数（%）÷100 ×0.8＝純アルコール量（g）。ハイボールは割る前のお酒で計算します。':'この分類の記事は準備中です。')))));else if(route==='wishlist')shell('気になる',h('div',{},h('h2',{text:'気になる一杯を、ゆっくり。'}),p('試してみたいお酒を残すリストは、次の版で追加予定です。','muted')));else home();}
-window.addEventListener('hashchange',()=>{dirty=false;render();});window.addEventListener('pageshow',()=>{if(!dirty)render();});document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!dirty)render();});setInterval(()=>{if(!dirty&&(!location.hash||location.hash==='#/'))home();},60000);
-try{data=await open();}catch(e){storageError='この環境では端末内保存を使えません。通常のブラウザで開き直してください。'+e.message;}render();if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
-
+import {
+  APP,
+  types,
+  presets,
+  observations,
+  uid,
+  today,
+  week,
+  addDays,
+  validDate,
+  alcohol,
+  grams,
+  fmt,
+  emptyData,
+  target,
+  summary,
+  validateBackup,
+} from "./model.js";
+import { open, save } from "./db.js";
+let data = emptyData(),
+  storageError = "",
+  dirty = false,
+  busy = false;
+const app = document.querySelector("#app");
+function h(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "text") e.textContent = v;
+    else if (k === "value") e.value = v;
+    else if (k === "class") e.className = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of kids.flat(Infinity))
+    if (c != null)
+      e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+}
+const link = (text, url, cls = "btn btn-quiet") =>
+  h("a", { href: url, class: cls, text });
+const button = (text, fn, cls = "btn btn-quiet") =>
+  h("button", { type: "button", class: cls, text, onClick: fn });
+const p = (text, cls = "") => h("p", { text, class: cls });
+function field(label, input, hint = "") {
+  return h(
+    "label",
+    { class: "field" },
+    h("span", { class: "lab", text: label }),
+    input,
+    hint ? h("span", { class: "hint", text: hint }) : null,
+  );
+}
+function input(type, value = "", attrs = {}) {
+  return h("input", { type, value, ...attrs });
+}
+function go(url) {
+  if (dirty && !confirm("保存されていない入力を破棄しますか？")) return;
+  dirty = false;
+  location.hash = url;
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a");
+  if (a?.getAttribute("href")?.startsWith("#") && dirty) {
+    e.preventDefault();
+    go(a.getAttribute("href"));
+  }
+});
+window.addEventListener("beforeunload", (e) => {
+  if (dirty) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+function notify(s) {
+  const el = document.querySelector("#message");
+  if (el) {
+    el.textContent = s;
+    el.focus();
+  } else alert(s);
+}
+async function commit(next, after) {
+  if (busy) return;
+  busy = true;
+  document
+    .querySelectorAll("button[type=submit]")
+    .forEach((b) => (b.disabled = true));
+  try {
+    await save(next);
+    data = next;
+    dirty = false;
+    after?.();
+  } catch (e) {
+    notify("保存できませんでした。入力は残っています。" + e.message);
+  } finally {
+    busy = false;
+    document
+      .querySelectorAll("button[type=submit]")
+      .forEach((b) => (b.disabled = false));
+  }
+}
+function shell(title, node) {
+  app.replaceChildren(
+    h(
+      "header",
+      { class: "topbar" },
+      location.hash && location.hash !== "#/"
+        ? button("‹", () => go("#/"), "icon-btn")
+        : null,
+      h("h1", { class: "title", text: title }),
+      link("設定", "#/settings", "icon-btn"),
+    ),
+    storageError
+      ? h("div", { class: "status", role: "alert", text: storageError })
+      : h("span", { hidden: "" }),
+    h(
+      "main",
+      {},
+      h("p", {
+        id: "message",
+        role: "status",
+        tabindex: "-1",
+        class: "saved-message",
+      }),
+      node,
+    ),
+    h(
+      "nav",
+      { class: "tabbar", "aria-label": "メインメニュー" },
+      [
+        ["ノート", "#/"],
+        ["事典", "#/dictionary"],
+        ["気になる", "#/wishlist"],
+      ].map(([t, u]) =>
+        h("a", {
+          href: u,
+          ...((location.hash || "#/") === u ? { "aria-current": "page" } : {}),
+          text: t,
+        }),
+      ),
+    ),
+  );
+  window.scrollTo(0, 0);
+}
+function impressions(id) {
+  return data.impressions
+    .filter((i) => i.recordId === id)
+    .sort((a, b) => a.writtenAt.localeCompare(b.writtenAt));
+}
+function warnings(s, t) {
+  const out = [];
+  if (grams(s.daily) > t.daily)
+    out.push(
+      "この日の自主目標を " +
+        fmt(grams(s.daily) - t.daily) +
+        "g 超えています。",
+    );
+  else if (s.daily > 0 && grams(s.daily) === t.daily)
+    out.push("この日の自主目標に達しています。");
+  if (grams(s.weekly) > t.weekly)
+    out.push(
+      "今週の自主目標を " +
+        fmt(grams(s.weekly) - t.weekly) +
+        "g 超えています。",
+    );
+  if (s.days > t.days) out.push("今週の飲酒日数が自主目標を超えています。");
+  return out;
+}
+function weekCard() {
+  const s = summary(data),
+    t = target(data);
+  return h(
+    "section",
+    { class: "card week" },
+    h(
+      "div",
+      { class: "row spread" },
+      h("h2", { text: "今週の記録" }),
+      h("span", { class: "small muted", text: s.start + " 〜 " + s.end }),
+    ),
+    p(fmt(grams(s.weekly)) + "g / " + t.weekly + "g", "amount"),
+    h(
+      "div",
+      {
+        class: "progress",
+        role: "progressbar",
+        "aria-label": "今週の自主目標に対する使用量",
+        "aria-valuemin": "0",
+        "aria-valuemax": String(t.weekly || 1),
+        "aria-valuenow": String(Math.min(grams(s.weekly), t.weekly || 1)),
+      },
+      h("div", {
+        style:
+          "width:" +
+          Math.min(
+            100,
+            t.weekly ? (grams(s.weekly) / t.weekly) * 100 : s.weekly ? 100 : 0,
+          ) +
+          "%",
+      }),
+    ),
+    h(
+      "dl",
+      {},
+      h(
+        "div",
+        {},
+        h("dt", { text: "使用量" }),
+        h("dd", {
+          text:
+            fmt(grams(s.weekly) / 14) + " / " + fmt(t.weekly / 14) + "カード",
+        }),
+      ),
+      h(
+        "div",
+        {},
+        h("dt", { text: "飲酒日数" }),
+        h("dd", { text: s.days + "日 / 週" + t.days + "日" }),
+      ),
+      h(
+        "div",
+        {},
+        h("dt", { text: "今週の残り（自主目標との差）" }),
+        h("dd", { text: fmt(Math.max(0, t.weekly - grams(s.weekly))) + "g" }),
+      ),
+      h(
+        "div",
+        {},
+        h("dt", { text: "今日の記録" }),
+        h("dd", { text: fmt(grams(s.daily)) + "g" }),
+      ),
+    ),
+    ...warnings(s, t).map((x) => p(x, "banner")),
+    p(
+      "本人が設定する自主目標です。医学的に安全な量を示すものではありません。",
+      "small muted",
+    ),
+  );
+}
+function home() {
+  const q = input("search", "", {
+      placeholder: "銘柄・種類・場所・感想で探す",
+      "aria-label": "過去の記録を検索",
+    }),
+    list = h("div");
+  const paint = () => {
+    const term = q.value.normalize("NFKC").toLowerCase();
+    list.replaceChildren();
+    const rs = [...data.records]
+      .sort(
+        (a, b) =>
+          b.drankOn.localeCompare(a.drankOn) ||
+          b.createdAt.localeCompare(a.createdAt),
+      )
+      .filter((r) =>
+        [
+          r.nameSnapshot,
+          r.typeSnapshot,
+          r.place,
+          ...impressions(r.id).map((i) => i.currentText),
+        ]
+          .join(" ")
+          .normalize("NFKC")
+          .toLowerCase()
+          .includes(term),
+      );
+    if (!rs.length)
+      list.append(
+        p(
+          term
+            ? "該当する記録がありません。"
+            : "まだ一杯の記録がありません。飲まない日も、そのままで。",
+          "muted",
+        ),
+      );
+    for (const r of rs)
+      list.append(
+        h(
+          "article",
+          { class: "entry" },
+          h(
+            "a",
+            { href: "#/record/" + r.id },
+            p(r.drankOn + "　" + (r.typeSnapshot || "種類未設定"), "meta"),
+            h("h3", { text: r.nameSnapshot || "名称未設定" }),
+            p(
+              impressions(r.id)[0]?.currentText || "感想はまだありません。",
+              "pre",
+            ),
+            p(fmt(grams(alcohol(r.abvPercent, r.volumeMl))) + "g", "meta"),
+          ),
+        ),
+      );
+  };
+  q.addEventListener("input", paint);
+  paint();
+  shell(
+    "ノート",
+    h(
+      "div",
+      {},
+      weekCard(),
+      link("＋ お酒を記録", "#/new", "btn btn-primary btn-block"),
+      h("h2", { text: "一杯のノート" }),
+      q,
+      list,
+    ),
+  );
+}
+function recordForm(id, productId) {
+  const old = data.records.find((r) => r.id === id);
+  if (id && !old)
+    return shell("見つかりません", p("この記録は見つかりません。"));
+  const product = data.products.find((p) => p.id === productId);
+  const r =
+      old ||
+      (product
+        ? {
+            productId: product.id,
+            nameSnapshot: product.name,
+            typeSnapshot: product.type,
+            abvPercent: product.defaultAbv,
+          }
+        : {}),
+    initial = old ? impressions(id).find((i) => i.kind === "initial") : null;
+  const date = input("date", r.drankOn || today(), {
+      required: "",
+      max: today(),
+    }),
+    name = input("text", r.nameSnapshot || ""),
+    type = h(
+      "select",
+      {},
+      h("option", { value: "", text: "未設定" }),
+      types.map((t) => h("option", { value: t, text: t })),
+    );
+  type.value = r.typeSnapshot || "";
+  const abv = input("number", r.abvPercent ?? "", {
+      min: "0",
+      max: "100",
+      step: ".01",
+      inputmode: "decimal",
+      required: "",
+    }),
+    ml = input("number", r.volumeMl ?? "", {
+      min: ".1",
+      max: "100000",
+      step: ".1",
+      inputmode: "decimal",
+      required: "",
+    }),
+    place = input("text", r.place || ""),
+    text = h("textarea", {
+      placeholder: "何を感じましたか？「今日は美味しかった！」だけでも。",
+      value: initial?.currentText || "",
+    }),
+    obs = observations.map((s, n) =>
+      h("textarea", {
+        rows: "2",
+        value: initial?.currentObservations[n] || "",
+      }),
+    ),
+    calc = h("div", { class: "calc", "aria-live": "polite" });
+  let touched = !!old;
+  const applyPreset = (k) => {
+    if (!presets[k]) return;
+    [abv.value, ml.value] = presets[k].map(String);
+    touched = false;
+    update();
+  };
+  type.addEventListener("change", () => {
+    if (!touched) applyPreset(type.value);
+  });
+  for (const el of [abv, ml])
+    el.addEventListener("input", () => {
+      touched = true;
+      update();
+    });
+  date.addEventListener("input", update);
+  function update() {
+    try {
+      if (!validDate(date.value) || abv.value === "" || ml.value === "")
+        throw Error();
+      const u = alcohol(Number(abv.value), Number(ml.value));
+      const draft = {
+        ...data,
+        records: [
+          ...data.records.filter((x) => x.id !== id),
+          {
+            drankOn: date.value,
+            abvPercent: Number(abv.value),
+            volumeMl: Number(ml.value),
+          },
+        ],
+      };
+      const s = summary(draft, date.value),
+        t = target(data, date.value);
+      calc.replaceChildren(
+        p(
+          "この一杯 " + fmt(grams(u)) + "g ・ " + fmt(grams(u) / 14) + "カード",
+        ),
+        p(
+          "保存後の当日 " +
+            fmt(grams(s.daily)) +
+            "g ／ 週 " +
+            fmt(grams(s.weekly)) +
+            "g",
+          "small",
+        ),
+        ...warnings(s, t).map((w) => p(w, "small")),
+      );
+    } catch {
+      calc.replaceChildren(
+        p("度数と飲んだ量を入力すると計算します。", "small"),
+      );
+    }
+  }
+  const form = h(
+    "form",
+    {},
+    p("銘柄や種類が未確定でも記録できます。", "muted"),
+    h("h2", { text: "基本情報" }),
+    field("飲んだ日", date),
+    field("お酒の種類", type),
+    h(
+      "details",
+      { class: "section" },
+      h("summary", { text: "度数・容量の入力補助" }),
+      p("実際のラベルの度数と、飲んだ量を優先してください。", "small muted"),
+      h(
+        "div",
+        { class: "row" },
+        Object.keys(presets).map((k) =>
+          button(
+            k,
+            () => {
+              if (
+                touched &&
+                !confirm("手入力した度数・容量を目安で置き換えますか？")
+              )
+                return;
+              type.value = k === "クラフトビール" ? "ビール" : k;
+              applyPreset(k);
+              dirty = true;
+            },
+            "btn btn-small",
+          ),
+        ),
+      ),
+    ),
+    field("銘柄・商品名", name),
+    h(
+      "div",
+      { class: "two" },
+      field("アルコール度数（%）", abv),
+      field("飲んだ量（ml）", ml),
+    ),
+    p(
+      "ハイボール・水割りは、割る前のお酒の量と度数で入力します。",
+      "small muted",
+    ),
+    field("飲んだ場所・購入店（任意）", place),
+    h("h2", { text: "アルコール計算" }),
+    calc,
+    h("h2", { text: "自分の感想" }),
+    field("飲んだ感想を自由に書く", text),
+    h(
+      "details",
+      { class: "section" },
+      h("summary", { text: "もう少し観察する（任意）" }),
+      observations.map((s, n) => field(s, obs[n])),
+    ),
+    button("保存する", () => form.requestSubmit(), "btn btn-primary btn-block"),
+  );
+  form.addEventListener("input", () => (dirty = true));
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!form.reportValidity()) return;
+    try {
+      if (!validDate(date.value) || date.value > today())
+        throw Error("飲んだ日を今日以前の日付で入力してください。");
+      alcohol(Number(abv.value), Number(ml.value));
+      const next = structuredClone(data),
+        now = new Date().toISOString(),
+        rid = id || uid();
+      let productId = r.productId || null;
+      if (!old && !productId && name.value.trim()) {
+        const candidates = next.products.filter(
+          (p) => p.name === name.value && p.type === type.value,
+        );
+        if (
+          candidates.length === 1 &&
+          confirm("登録済みの同じお酒に結び付けますか？")
+        )
+          productId = candidates[0].id;
+        else {
+          productId = uid();
+          next.products.push({
+            id: productId,
+            name: name.value,
+            type: type.value,
+            defaultAbv: Number(abv.value),
+            createdAt: now,
+          });
+        }
+      }
+      const rec = {
+        id: rid,
+        productId,
+        drankOn: date.value,
+        nameSnapshot: name.value,
+        typeSnapshot: type.value,
+        abvPercent: Number(abv.value),
+        volumeMl: Number(ml.value),
+        place: place.value,
+        createdAt: r.createdAt || now,
+        updatedAt: now,
+        calculationVersion: 1,
+      };
+      next.records = next.records.filter((x) => x.id !== rid);
+      next.records.push(rec);
+      const values = obs.map((o) => o.value);
+      if (initial) {
+        const i = next.impressions.find((x) => x.id === initial.id);
+        if (
+          i.currentText !== text.value ||
+          JSON.stringify(i.currentObservations) !== JSON.stringify(values)
+        ) {
+          i.revisions.push({
+            text: i.currentText,
+            observations: i.currentObservations,
+            at: now,
+          });
+          i.currentText = text.value;
+          i.currentObservations = values;
+        }
+      } else
+        next.impressions.push(
+          makeImpression(rid, text.value, values, "initial"),
+        );
+      commit(next, () => go("#/record/" + rid));
+    } catch (e) {
+      notify(e.message);
+    }
+  });
+  update();
+  shell(old ? "一杯を編集" : "お酒を記録", form);
+}
+function makeImpression(recordId, text, obs, kind) {
+  return {
+    id: uid(),
+    recordId,
+    kind,
+    writtenAt: new Date().toISOString(),
+    originalText: text,
+    currentText: text,
+    originalObservations: obs,
+    currentObservations: obs,
+    revisions: [],
+  };
+}
+function detail(id) {
+  const r = data.records.find((x) => x.id === id);
+  if (!r) return shell("見つかりません", p("この記録はありません。"));
+  const is = impressions(id),
+    node = h(
+      "div",
+      {},
+      p(r.drankOn + "　" + (r.typeSnapshot || "種類未設定"), "muted"),
+      h("h1", { text: r.nameSnapshot || "名称未設定" }),
+      p(
+        r.abvPercent +
+          "% ・ " +
+          r.volumeMl +
+          "ml ・ 純アルコール " +
+          fmt(grams(alcohol(r.abvPercent, r.volumeMl))) +
+          "g",
+      ),
+      r.place ? p(r.place, "muted") : null,
+      h(
+        "div",
+        { class: "row" },
+        link("編集", "#/edit/" + id),
+        button("削除", () => {
+          if (
+            confirm(
+              "この一杯と感想・原文履歴を削除します。元に戻せません。削除しますか？",
+            )
+          )
+            commit(
+              {
+                ...data,
+                records: data.records.filter((x) => x.id !== id),
+                impressions: data.impressions.filter((x) => x.recordId !== id),
+              },
+              () => go("#/"),
+            );
+        }),
+      ),
+      h("h2", { text: "自分の感想" }),
+    );
+  for (const i of is)
+    node.append(
+      h(
+        "section",
+        { class: "mine-box" },
+        p(
+          (i.kind === "initial" ? "最初の感想" : "追記") +
+            "　" +
+            today(new Date(i.writtenAt)),
+          "when",
+        ),
+        p(i.currentText || "（感想なし）", "pre"),
+        ...i.currentObservations.map((o, n) =>
+          o
+            ? h("div", {}, h("strong", { text: observations[n] }), p(o, "pre"))
+            : null,
+        ),
+        h(
+          "details",
+          { class: "section" },
+          h("summary", { text: "初回原文・修正履歴を見る" }),
+          p(i.originalText || "（本文なし）", "pre"),
+          ...i.originalObservations.map((o, n) =>
+            o ? p(observations[n] + "：" + o, "pre") : null,
+          ),
+          ...i.revisions.map((v) => p(v.at + "\n" + v.text, "revision pre")),
+        ),
+      ),
+    );
+  const area = h("textarea", {
+    placeholder: "後から気づいたことを、前の感想を残したまま。",
+    "aria-label": "感想を追記",
+  });
+  area.addEventListener("input", () => (dirty = true));
+  node.append(
+    h("h3", { text: "この一杯に感想を追記" }),
+    area,
+    button(
+      "感想を追記する",
+      () => {
+        if (!area.value.trim())
+          return notify("追記する感想を入力してください。");
+        commit(
+          {
+            ...data,
+            impressions: [
+              ...data.impressions,
+              makeImpression(
+                id,
+                area.value,
+                observations.map(() => ""),
+                "addition",
+              ),
+            ],
+          },
+          () => render(),
+        );
+      },
+      "btn btn-block",
+    ),
+    p("感想の追記では飲酒量は増えません。", "small muted"),
+  );
+  if (r.productId) {
+    const rs = data.records.filter((x) => x.productId === r.productId);
+    node.append(
+      h("h2", { text: "同じお酒の記録（" + rs.length + "回）" }),
+      ...rs.map((x) =>
+        link(
+          x.drankOn + "　" + (x.nameSnapshot || "名称未設定"),
+          "#/record/" + x.id,
+          "chip",
+        ),
+      ),
+    );
+  }
+  node.append(
+    link(
+      "＋ このお酒をもう一度記録",
+      r.productId ? "#/new/" + r.productId : "#/new",
+      "btn btn-primary btn-block",
+    ),
+  );
+  shell("一杯の記録", node);
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = h("a", { href: url, download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+function settings() {
+  const t = target(data),
+    daily = input("number", t.daily, {
+      min: "0",
+      max: "100000",
+      step: ".1",
+      required: "",
+    }),
+    weekly = input("number", t.weekly, {
+      min: "0",
+      max: "100000",
+      step: ".1",
+      required: "",
+    }),
+    days = input("number", t.days, {
+      min: "0",
+      max: "7",
+      step: "1",
+      required: "",
+    }),
+    from = h(
+      "select",
+      {},
+      h("option", { value: week(), text: "今週から" }),
+      h("option", { value: addDays(week(), 7), text: "翌週から" }),
+    );
+  const f = h(
+    "form",
+    {},
+    h("h2", { text: "自分で決める目標" }),
+    p(
+      "安全な量を保証する設定ではありません。1カード＝14g。日本時間・月曜開始です。",
+      "small muted",
+    ),
+    field("1日の上限目標（g）", daily),
+    field("1週間の上限目標（g）", weekly),
+    field("週の飲酒日数（最大）", days),
+    field("適用する週", from),
+    h("button", {
+      type: "submit",
+      class: "btn btn-primary",
+      text: "目標を保存",
+    }),
+  );
+  f.addEventListener("input", () => (dirty = true));
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!f.reportValidity()) return;
+    const v = {
+      from: from.value,
+      daily: +daily.value,
+      weekly: +weekly.value,
+      days: +days.value,
+    };
+    commit(
+      {
+        ...data,
+        settings: {
+          ...data.settings,
+          targetHistory: [
+            ...data.settings.targetHistory.filter((t) => t.from !== v.from),
+            v,
+          ],
+        },
+      },
+      () => {
+        render();
+        notify("目標を保存しました。");
+      },
+    );
+  });
+  const file = input("file", "", {
+    accept: ".json,application/json",
+    "aria-label": "復元するJSONファイル",
+  });
+  file.addEventListener("change", async () => {
+    try {
+      if (!file.files[0]) return;
+      const obj = JSON.parse(
+        (await file.files[0].text()).replace(/^\uFEFF/, ""),
+      );
+      const next = validateBackup(obj);
+      if (
+        confirm(
+          "現在の" +
+            data.records.length +
+            "杯の記録を、バックアップの" +
+            next.records.length +
+            "杯・感想" +
+            next.impressions.length +
+            "件で置き換えます。先に現在のJSONを書き出しておくことをおすすめします。復元しますか？",
+        )
+      )
+        await commit(next, () => {
+          render();
+          notify("復元しました。");
+        });
+    } catch (e) {
+      notify("復元できません。現在のデータは変更していません。" + e.message);
+    } finally {
+      file.value = "";
+    }
+  });
+  shell(
+    "設定とデータ",
+    h(
+      "div",
+      {},
+      f,
+      h("h2", { text: "バックアップ" }),
+      p(
+        "記録はこの端末のブラウザ内に保存します。端末変更やブラウザのデータ消去に備え、JSONを手元に残してください。",
+        "small muted",
+      ),
+      p(
+        "記録 " +
+          data.records.length +
+          "杯 ／ 感想 " +
+          data.impressions.length +
+          "件",
+      ),
+      button(
+        "完全バックアップを書き出す（JSON）",
+        () => {
+          const now = new Date().toISOString();
+          const snapshot = structuredClone(data);
+          snapshot.settings.lastBackupExportAt = now;
+          download(
+            APP + "-" + today() + ".json",
+            JSON.stringify(
+              { app: APP, schemaVersion: 1, exportedAt: now, data: snapshot },
+              null,
+              2,
+            ),
+            "application/json",
+          );
+          commit(snapshot, () =>
+            notify(
+              "JSONの書き出しを開始しました。ファイルの保存を確認してください。",
+            ),
+          );
+        },
+        "btn btn-primary btn-block",
+      ),
+      p(
+        data.settings.lastBackupExportAt
+          ? "最終書き出し開始：" + data.settings.lastBackupExportAt
+          : "まだ書き出していません。",
+        "small muted",
+      ),
+      h("h3", { text: "JSONから置き換えて復元" }),
+      file,
+      h("h2", { text: "ホーム画面に置く" }),
+      p(
+        "iPhone：Safariの共有から「ホーム画面に追加」。Android：Chromeのメニューからインストール。初回読み込み後、オフラインでも記録できます。",
+        "small",
+      ),
+      p(
+        "探究お酒 v1.0 ・ 事典／気になるは次の版で追加予定です。",
+        "small muted",
+      ),
+    ),
+  );
+}
+function render() {
+  const [route, id] = (location.hash || "#/").slice(2).split("/");
+  if (route === "new") recordForm(undefined, id);
+  else if (route === "edit") recordForm(id);
+  else if (route === "record") detail(id);
+  else if (route === "settings") settings();
+  else if (route === "dictionary")
+    shell(
+      "事典",
+      h(
+        "div",
+        {},
+        p("一杯から、背景をたどる。", "lead serif"),
+        ...[
+          "お酒の種類と特徴",
+          "原料と製法",
+          "産地・歴史・文化",
+          "香り・味わい・余韻の表現",
+          "飲酒量と純アルコールの計算方法",
+        ].map((x, n) =>
+          h(
+            "details",
+            { class: "section" },
+            h("summary", { text: x }),
+            p(
+              n === 4
+                ? "容量（ml）× 度数（%）÷100 ×0.8＝純アルコール量（g）。ハイボールは割る前のお酒で計算します。"
+                : "この分類の記事は準備中です。",
+            ),
+          ),
+        ),
+      ),
+    );
+  else if (route === "wishlist")
+    shell(
+      "気になる",
+      h(
+        "div",
+        {},
+        h("h2", { text: "気になる一杯を、ゆっくり。" }),
+        p("試してみたいお酒を残すリストは、次の版で追加予定です。", "muted"),
+      ),
+    );
+  else home();
+}
+window.addEventListener("hashchange", () => {
+  dirty = false;
+  render();
+});
+window.addEventListener("pageshow", () => {
+  if (!dirty) render();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !dirty) render();
+});
+setInterval(() => {
+  if (!dirty && (!location.hash || location.hash === "#/")) home();
+}, 60000);
+try {
+  data = await open();
+} catch (e) {
+  storageError =
+    "この環境では端末内保存を使えません。通常のブラウザで開き直してください。" +
+    e.message;
+}
+render();
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker.register("./sw.js").catch(() => {});

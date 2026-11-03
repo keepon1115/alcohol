@@ -1,1 +1,56 @@
-const CACHE='tankyu-alcohol-6d87968328e8';const ASSETS=["./","./css/alcohol.css","./css/app.css","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/icon.svg","./index.html","./js/app.js","./js/db.js","./js/model.js","./manifest.webmanifest"];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const k of await caches.keys())if(k.startsWith('tankyu-alcohol-')&&k!==CACHE)await caches.delete(k);await self.clients.claim();})()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==location.origin||!u.pathname.startsWith(new URL('./',location.href).pathname))return;e.respondWith((async()=>{const c=await caches.open(CACHE);return await c.match(e.request,{ignoreSearch:true})||await fetch(e.request).catch(async err=>{if(e.request.mode==='navigate')return await c.match('./index.html');throw err;});})());});
+const CACHE = "tankyu-alcohol-6d87968328e8";
+const ASSETS = [
+  "./",
+  "./css/alcohol.css",
+  "./css/app.css",
+  "./icons/apple-touch-icon.png",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./icons/icon.svg",
+  "./index.html",
+  "./js/app.js",
+  "./js/db.js",
+  "./js/model.js",
+  "./manifest.webmanifest",
+];
+self.addEventListener("install", (e) =>
+  e.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) =>
+        c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" }))),
+      ),
+  ),
+);
+self.addEventListener("activate", (e) =>
+  e.waitUntil(
+    (async () => {
+      for (const k of await caches.keys())
+        if (k.startsWith("tankyu-alcohol-") && k !== CACHE)
+          await caches.delete(k);
+      await self.clients.claim();
+    })(),
+  ),
+);
+self.addEventListener("fetch", (e) => {
+  const u = new URL(e.request.url);
+  if (
+    e.request.method !== "GET" ||
+    u.origin !== location.origin ||
+    !u.pathname.startsWith(new URL("./", location.href).pathname)
+  )
+    return;
+  e.respondWith(
+    (async () => {
+      const c = await caches.open(CACHE);
+      return (
+        (await c.match(e.request, { ignoreSearch: true })) ||
+        (await fetch(e.request).catch(async (err) => {
+          if (e.request.mode === "navigate")
+            return await c.match("./index.html");
+          throw err;
+        }))
+      );
+    })(),
+  );
+});

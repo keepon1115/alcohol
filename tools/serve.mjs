@@ -1,1 +1,34 @@
-import http from 'node:http';import fs from 'node:fs';import path from 'node:path';const root=path.resolve('app');const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.webmanifest':'application/manifest+json'};http.createServer((req,res)=>{const p=path.resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));if(!p.startsWith(root+path.sep)&&p!==root){res.writeHead(403).end();return;}let f=p;if(fs.existsSync(f)&&fs.statSync(f).isDirectory())f=path.join(f,'index.html');fs.readFile(f,(e,b)=>{res.writeHead(e?404:200,{'Content-Type':mime[path.extname(f)]||'application/octet-stream','Cache-Control':'no-cache'});res.end(e?'Not found':b);});}).listen(4173,'127.0.0.1',()=>console.log('http://127.0.0.1:4173'));
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+const root = path.resolve("app");
+const mime = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json",
+};
+http
+  .createServer((req, res) => {
+    const p = path.resolve(
+      root,
+      "." + decodeURIComponent(new URL(req.url, "http://localhost").pathname),
+    );
+    if (!p.startsWith(root + path.sep) && p !== root) {
+      res.writeHead(403).end();
+      return;
+    }
+    let f = p;
+    if (fs.existsSync(f) && fs.statSync(f).isDirectory())
+      f = path.join(f, "index.html");
+    fs.readFile(f, (e, b) => {
+      res.writeHead(e ? 404 : 200, {
+        "Content-Type": mime[path.extname(f)] || "application/octet-stream",
+        "Cache-Control": "no-cache",
+      });
+      res.end(e ? "Not found" : b);
+    });
+  })
+  .listen(4173, "127.0.0.1", () => console.log("http://127.0.0.1:4173"));

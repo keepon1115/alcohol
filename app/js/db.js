@@ -1,8 +1,88 @@
-import {APP,emptyData} from './model.js';
-const names=['products','records','impressions','articles','wishlist','settings'];
+import { APP, emptyData } from "./model.js";
+const names = [
+  "products",
+  "records",
+  "impressions",
+  "articles",
+  "wishlist",
+  "settings",
+];
 let db;
 // Revision tracking prevents a stale tab from overwriting newer records.
-let revision=0;
-export async function open(){db=await new Promise((resolve,reject)=>{const r=indexedDB.open(APP,1);r.onupgradeneeded=()=>{for(const n of names)r.result.createObjectStore(n,{keyPath:n==='settings'?'key':'id'});};r.onsuccess=()=>{r.result.onversionchange=()=>r.result.close();resolve(r.result);};r.onerror=()=>reject(r.error);r.onblocked=()=>reject(Error('別のタブを閉じて再読み込みしてください。'));});return new Promise((resolve,reject)=>{const t=db.transaction(names,'readonly');const data=emptyData();for(const n of names){const r=t.objectStore(n).getAll();r.onsuccess=()=>{if(n==='settings'){if(r.result[0]){const {key,...s}=r.result[0];data.settings=s;revision=s.revision||0;}}else data[n]=r.result;};}t.oncomplete=()=>resolve(data);t.onabort=()=>reject(t.error);});}
-export async function save(data){if(!db)throw Error('端末内保存を使えません。入力をコピーしてから通常のブラウザで開き直してください。');return new Promise((resolve,reject)=>{const t=db.transaction(names,'readwrite');let problem;t.oncomplete=()=>{revision++;data.settings.revision=revision;resolve();};t.onabort=()=>reject(problem||t.error||Error('保存を中断しました'));t.onerror=()=>{};const check=t.objectStore('settings').get('settings');check.onsuccess=()=>{try{if((check.result?.revision||0)!==revision)throw Error('別のタブで記録が更新されました。入力をコピーしてから再読み込みしてください。');for(const n of names){const s=t.objectStore(n);s.clear();if(n==='settings')s.put({...data.settings,revision:revision+1,key:'settings'});else for(const x of data[n])s.put(x);}}catch(e){problem=e;t.abort();}};});}
-
+let revision = 0;
+export async function open() {
+  db = await new Promise((resolve, reject) => {
+    const r = indexedDB.open(APP, 1);
+    r.onupgradeneeded = () => {
+      for (const n of names)
+        r.result.createObjectStore(n, {
+          keyPath: n === "settings" ? "key" : "id",
+        });
+    };
+    r.onsuccess = () => {
+      r.result.onversionchange = () => r.result.close();
+      resolve(r.result);
+    };
+    r.onerror = () => reject(r.error);
+    r.onblocked = () =>
+      reject(Error("別のタブを閉じて再読み込みしてください。"));
+  });
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(names, "readonly");
+    const data = emptyData();
+    for (const n of names) {
+      const r = t.objectStore(n).getAll();
+      r.onsuccess = () => {
+        if (n === "settings") {
+          if (r.result[0]) {
+            const { key, ...s } = r.result[0];
+            data.settings = s;
+            revision = s.revision || 0;
+          }
+        } else data[n] = r.result;
+      };
+    }
+    t.oncomplete = () => resolve(data);
+    t.onabort = () => reject(t.error);
+  });
+}
+export async function save(data) {
+  if (!db)
+    throw Error(
+      "端末内保存を使えません。入力をコピーしてから通常のブラウザで開き直してください。",
+    );
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(names, "readwrite");
+    let problem;
+    t.oncomplete = () => {
+      revision++;
+      data.settings.revision = revision;
+      resolve();
+    };
+    t.onabort = () => reject(problem || t.error || Error("保存を中断しました"));
+    t.onerror = () => {};
+    const check = t.objectStore("settings").get("settings");
+    check.onsuccess = () => {
+      try {
+        if ((check.result?.revision || 0) !== revision)
+          throw Error(
+            "別のタブで記録が更新されました。入力をコピーしてから再読み込みしてください。",
+          );
+        for (const n of names) {
+          const s = t.objectStore(n);
+          s.clear();
+          if (n === "settings")
+            s.put({
+              ...data.settings,
+              revision: revision + 1,
+              key: "settings",
+            });
+          else for (const x of data[n]) s.put(x);
+        }
+      } catch (e) {
+        problem = e;
+        t.abort();
+      }
+    };
+  });
+}
