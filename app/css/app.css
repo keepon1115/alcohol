@@ -1,13 +1,13 @@
-/* 探究コーヒー — 静かな喫茶店のノート。外部フォント・外部通信なし。 */
+/* 探究お酒 — ネイビーの静かなノート。外部フォント・外部通信なし。 */
 :root {
-  --bg: #f7f3eb;
-  --paper: #fffcf6;
-  --ink: #382d25;
-  --ink-sub: #75695f;
-  --line: #ded5c8;
-  --accent: #856047;
-  --accent-ink: #fffcf6;
-  --green: #64765a;
+  --bg: #eef2f6;
+  --paper: #fbfcfe;
+  --ink: #1e2d43;
+  --ink-sub: #637087;
+  --line: #d5deea;
+  --accent: #253f60;
+  --accent-ink: #fbfcfe;
+  --green: #597286;
   --honey: #b8893f;
   --danger: #9a3b30;
   --serif:
@@ -127,7 +127,7 @@ summary:focus-visible {
   text-decoration: none;
 }
 .icon-btn:active {
-  background: rgba(133, 96, 71, 0.12);
+  background: rgba(37, 63, 96, 0.12);
 }
 .icon-btn svg {
   width: 24px;
@@ -193,7 +193,7 @@ main.has-actionbar {
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   z-index: 15;
   padding: 8px 16px;
-  background: linear-gradient(to top, var(--bg) 70%, rgba(247, 243, 235, 0));
+  background: linear-gradient(to top, var(--bg) 70%, rgba(238, 242, 246, 0));
 }
 .actionbar .btn {
   max-width: 640px;
@@ -358,7 +358,7 @@ a.card {
   text-decoration: none;
 }
 a.card:active {
-  background: #f3ecdf;
+  background: #edf2f8;
 }
 .card h3 {
   margin: 0 0 2px;

@@ -22,6 +22,9 @@ let data = emptyData(),
   dirty = false,
   busy = false;
 const app = document.querySelector("#app");
+// Calculator values are temporary; calculating never writes a drinking record.
+const calculatorDraft = { abv: "5", ml: "350" };
+let pendingCalculation = null;
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -236,6 +239,115 @@ function weekCard() {
     ),
   );
 }
+function quickCalculator() {
+  const abv = input("number", calculatorDraft.abv, {
+    min: "0",
+    max: "100",
+    step: ".01",
+    inputmode: "decimal",
+  });
+  const ml = input("number", calculatorDraft.ml, {
+    min: ".1",
+    max: "100000",
+    step: ".1",
+    inputmode: "decimal",
+  });
+  const result = h("div", {
+    class: "calculator-result",
+    "aria-live": "polite",
+  });
+  const record = button(
+    "この量でお酒を記録",
+    () => {
+      pendingCalculation = {
+        abvPercent: Number(abv.value),
+        volumeMl: Number(ml.value),
+      };
+      go("#/new");
+    },
+    "btn btn-primary btn-block",
+  );
+  const update = () => {
+    calculatorDraft.abv = abv.value;
+    calculatorDraft.ml = ml.value;
+    try {
+      if (abv.value === "" || ml.value === "")
+        throw Error("度数と飲む量を入力してください。");
+      const g = grams(alcohol(Number(abv.value), Number(ml.value)));
+      const limit = target(data).daily;
+      result.replaceChildren(
+        p("純アルコール量", "small muted"),
+        p(fmt(g) + "g", "calculator-grams"),
+        p("約 " + (g / 14).toFixed(2) + " カード", "calculator-cards"),
+        h(
+          "div",
+          { class: "progress" },
+          h("div", {
+            style:
+              "width:" +
+              Math.min(100, limit ? (g / limit) * 100 : g > 0 ? 100 : 0) +
+              "%",
+          }),
+        ),
+        p(
+          g > limit
+            ? "この一杯は1日の自主目標 " + limit + "g を超えています。"
+            : "この一杯は1日の自主目標 " + limit + "g 以内です。",
+          g > limit ? "calculator-warning small" : "small",
+        ),
+      );
+      record.disabled = false;
+    } catch (e) {
+      result.replaceChildren(p(e.message, "small muted"));
+      record.disabled = true;
+    }
+  };
+  abv.addEventListener("input", update);
+  ml.addEventListener("input", update);
+  update();
+  const source = h("a", {
+    href: "https://www.mhlw.go.jp/stf/newpage_38541.html",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    text: "厚生労働省の計算式",
+  });
+  return h(
+    "section",
+    {
+      class: "card quick-calculator",
+      "aria-label": "マイ・アルコールカード計算機",
+    },
+    h("h2", { text: "マイ・アルコールカード計算機" }),
+    h(
+      "div",
+      { class: "two" },
+      field("アルコール度数（%）", abv),
+      field("飲む量（ml）", ml),
+    ),
+    result,
+    p(
+      "当日の合計量とは別の計算です。自主目標は安全な量を示すものではありません。",
+      "small muted",
+    ),
+    h(
+      "p",
+      { class: "small muted" },
+      "計算式：量（ml）× 度数 ÷ 100 × 0.8。",
+      source,
+    ),
+    button(
+      "ビール350mlの設定に戻す",
+      () => {
+        abv.value = "5";
+        ml.value = "350";
+        update();
+      },
+      "btn btn-quiet btn-block",
+    ),
+    record,
+    p("計算だけでは記録に保存されません。", "calculator-footnote small muted"),
+  );
+}
 function home() {
   const q = input("search", "", {
       placeholder: "銘柄・種類・場所・感想で探す",
@@ -298,8 +410,9 @@ function home() {
     h(
       "div",
       {},
+      quickCalculator(),
       weekCard(),
-      link("＋ お酒を記録", "#/new", "btn btn-primary btn-block"),
+      link("＋ お酒を記録", "#/new", "btn btn-quiet btn-block"),
       h("h2", { text: "一杯のノート" }),
       q,
       list,
@@ -320,8 +433,9 @@ function recordForm(id, productId) {
             typeSnapshot: product.type,
             abvPercent: product.defaultAbv,
           }
-        : {}),
+        : pendingCalculation || {}),
     initial = old ? impressions(id).find((i) => i.kind === "initial") : null;
+  if (!old) pendingCalculation = null;
   const date = input("date", r.drankOn || today(), {
       required: "",
       max: today(),
@@ -360,7 +474,7 @@ function recordForm(id, productId) {
       }),
     ),
     calc = h("div", { class: "calc", "aria-live": "polite" });
-  let touched = !!old;
+  let touched = !!old || !!r.volumeMl;
   const applyPreset = (k) => {
     if (!presets[k]) return;
     [abv.value, ml.value] = presets[k].map(String);
@@ -908,7 +1022,12 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && !dirty) render();
 });
 setInterval(() => {
-  if (!dirty && (!location.hash || location.hash === "#/")) home();
+  if (
+    !dirty &&
+    !document.activeElement?.closest("input,textarea,select") &&
+    (!location.hash || location.hash === "#/")
+  )
+    home();
 }, 60000);
 try {
   data = await open();
